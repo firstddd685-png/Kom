@@ -1,0 +1,195 @@
+-- LocalScript | เดินตามหลังผู้เล่นใกล้สุด (ไม่นับคนที่ตาย) + ESP เห็นกรอบรอบผู้เล่น, Toggle เปิดปิด
+
+local Players = game:GetService("Players")
+local LOCAL_PLAYER = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+
+-- GUI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowESP_GUI"
+screenGui.Parent = LOCAL_PLAYER:WaitForChild("PlayerGui")
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 190, 0, 60)
+frame.Position = UDim2.new(0, 50, 0, 50)
+frame.BackgroundColor3 = Color3.fromRGB(40,25,40)
+frame.BackgroundTransparency = 0.2
+frame.BorderSizePixel = 0
+frame.Parent = screenGui
+
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 170, 0, 40)
+toggleBtn.Position = UDim2.new(0, 10, 0, 10)
+toggleBtn.Text = "Follow OFF"
+toggleBtn.TextSize = 24
+toggleBtn.BackgroundColor3 = Color3.fromRGB(100,30,30)
+toggleBtn.TextColor3 = Color3.fromRGB(255,220,220)
+toggleBtn.BorderSizePixel = 0
+toggleBtn.Parent = frame
+
+-- ESP Container
+local espGui = Instance.new("ScreenGui")
+espGui.Name = "ESP_GUI"
+espGui.Parent = LOCAL_PLAYER:WaitForChild("PlayerGui")
+espGui.ResetOnSpawn = false
+espGui.IgnoreGuiInset = true
+
+local enabled = false
+local followConnection
+local espConnection
+
+local WALK_SPEED = 16        -- ความเร็วเดิน
+local FOLLOW_DISTANCE = 3    -- ระยะห่างหลังเป้าหมาย
+
+-- --- หา Player ที่ "ไม่ตาย" (Humanoid.Health > 0 และ not dead)
+local function getClosestAlivePlayer()
+    local myChar = LOCAL_PLAYER.Character
+    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") or not myChar:FindFirstChild("Humanoid") then return end
+    local myPos = myChar.HumanoidRootPart.Position
+    local closest, dist = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LOCAL_PLAYER and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") then
+            local hum = p.Character.Humanoid
+            if hum.Health > 0 and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+                local pos = p.Character.HumanoidRootPart.Position
+                local d = (myPos - pos).Magnitude
+                if d < dist then
+                    closest = p
+                    dist = d
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- --- เดินตามหลัง
+local function slowFollow()
+    local myChar = LOCAL_PLAYER.Character
+    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") or not myChar:FindFirstChild("Humanoid") then return end
+    local myHRP = myChar.HumanoidRootPart
+    local myHumanoid = myChar.Humanoid
+
+    local target = getClosestAlivePlayer()
+    if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
+    local targetHRP = target.Character.HumanoidRootPart
+
+    local backOffset = targetHRP.CFrame.LookVector * -FOLLOW_DISTANCE
+    local targetPos = targetHRP.Position + backOffset + Vector3.new(0,0.1,0)
+
+    -- หมุนตัวเองไปทางเป้าหมาย
+    myHRP.CFrame = CFrame.new(myHRP.Position, targetHRP.Position)
+
+    -- เดินตามหลัง
+    myHumanoid.WalkSpeed = WALK_SPEED
+    myHumanoid:MoveTo(targetPos)
+end
+
+local function startFollowing()
+    if followConnection then return end
+    followConnection = RunService.Heartbeat:Connect(function()
+        pcall(slowFollow)
+    end)
+end
+
+local function stopFollowing()
+    if followConnection then
+        followConnection:Disconnect()
+        followConnection = nil
+    end
+    local myChar = LOCAL_PLAYER.Character
+    if myChar and myChar:FindFirstChild("Humanoid") then
+        myChar.Humanoid:Move(Vector3.new(0,0,0))
+    end
+end
+
+-- --- ESP Box (draw around 'alive' players)
+local function createOrGetESPBox(p)
+    local name = "ESP_".. p.Name
+    local box = espGui:FindFirstChild(name)
+    if not box then
+        box = Instance.new("Frame")
+        box.Name = name
+        box.BackgroundTransparency = 1
+        box.BorderSizePixel = 2
+        box.BorderColor3 = Color3.fromRGB(0,255,0)
+        box.Size = UDim2.new(0,60,0,60)
+        box.AnchorPoint = Vector2.new(0.5,0.5)
+        box.Parent = espGui
+    end
+    return box
+end
+
+local function removeESPBox(p)
+    local name = "ESP_".. p.Name
+    local box = espGui:FindFirstChild(name)
+    if box then
+        box:Destroy()
+    end
+end
+
+local function updateESP()
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p ~= LOCAL_PLAYER and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") then
+            local hum = p.Character.Humanoid
+            if hum.Health > 0 and hum:GetState() ~= Enum.HumanoidStateType.Dead then
+                local box = createOrGetESPBox(p)
+                -- project world to screen (ViewportPointToRay)
+                local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
+                if onScreen then
+                    box.Visible = true
+                    box.Position = UDim2.new(0, pos.X, 0, pos.Y)
+                else
+                    box.Visible = false
+                end
+            else
+                removeESPBox(p)
+            end
+        else
+            removeESPBox(p)
+        end
+    end
+end
+
+-- --- เช็ค ESP ทุกเฟรม
+local function startESP()
+    if espConnection then return end
+    espConnection = RunService.RenderStepped:Connect(function()
+        pcall(updateESP)
+    end)
+end
+
+local function stopESP()
+    if espConnection then
+        espConnection:Disconnect()
+        espConnection = nil
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        removeESPBox(p)
+    end
+end
+
+toggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    if enabled then
+        toggleBtn.Text = "Follow ON"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(40,100,40)
+        toggleBtn.TextColor3 = Color3.fromRGB(220,255,220)
+        startFollowing()
+        startESP()
+    else
+        toggleBtn.Text = "Follow OFF"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100,30,30)
+        toggleBtn.TextColor3 = Color3.fromRGB(255,220,220)
+        stopFollowing()
+        stopESP()
+    end
+end)
+
+Players.LocalPlayer.CharacterAdded:Connect(function()
+    if enabled then
+        stopFollowing()
+        wait(2)
+        startFollowing()
+    end
+end)
