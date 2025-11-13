@@ -48,6 +48,10 @@ local SilentAimEnabled = false
 local FOVRadius = 120
 local CurrentTarget = nil
 
+-- ตั้งค่าดักปิง 100ms และกระสุน 2000 stud/s อัตโนมัติเมื่อเปิด Silent Aim
+local ConstantPingTime = 0.1 -- 100ms
+local ConstantBulletSpeed = 2000 -- studs/s
+
 local SilentFOVCircle = Drawing.new("Circle")
 SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
 SilentFOVCircle.Thickness = 1
@@ -63,8 +67,27 @@ Tracer.Color = Color3.fromRGB(0, 255, 255)
 Tracer.Transparency = 1
 Tracer.Visible = false
 
-local function predictPosition(head, hrp)
-    return head.Position -- ยิงเข้าโมเดลจริง ไม่ดัก ping
+local function isBehindWall(startPos, endPos)
+    -- ยิง Ray เพื่อเช็คว่ามีสิ่งกีดขวางระหว่างจุดเริ่มต้นกับเป้าหมาย
+    local ray = Ray.new(startPos, endPos - startPos)
+    local ignoreList = {LocalPlayer.Character, CurrentTarget and CurrentTarget.Character or nil}
+    local hit, part = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
+    return hit ~= nil and ((hit.Position - endPos).Magnitude > 0.7)
+end
+
+-- ยิงดักปิงและคำนวณจุด (ชดเชยความเร็วกระสุน)
+local function predictWallbangPosition(head, hrp)
+    local velocity = hrp and hrp.Velocity or Vector3.zero
+    local origin = Camera.CFrame.Position
+    local distance = (head.Position - origin).Magnitude
+    local bulletTravelTime = distance / ConstantBulletSpeed
+    local t = bulletTravelTime + ConstantPingTime
+    return head.Position + (velocity * t)
+end
+
+-- ยิงเข้าหัวตรงๆ
+local function headPosition(head)
+    return head.Position
 end
 
 local function getClosestTarget()
@@ -148,12 +171,20 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
         local hrp = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
         local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
         if head and humanoid and hrp then
-            local aimPos = predictPosition(head, hrp)
+            local myHeadPos = LocalPlayer.Character.Head.Position
+            local targetPos = head.Position
+            local aimPos
+
+            if isBehindWall(myHeadPos, targetPos) then
+                -- ถ้ามีกำแพง ใช้ยิงทะลุ (predictWallbangPosition)
+                aimPos = predictWallbangPosition(head, hrp)
+            else
+                -- ถ้าไม่มี ยิงเข้าหัวปกติ
+                aimPos = headPosition(head)
+            end
             local displacement = aimPos - head.Position
             local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
             local previousHealth = humanoid.Health
-
-            -- ยิงทะลุ ไม่มีเงื่อนไขสิ่งกีดขวาง
 
             args[4] = CFrame.new(math.huge, math.huge, math.huge)
             args[5] = {
@@ -208,7 +239,6 @@ Tab:Slider({
     },
     Callback = function(value)
         FOVRadius = tonumber(value) or 120
-        print("FOV",FOVRadius)
     end
 })
 
