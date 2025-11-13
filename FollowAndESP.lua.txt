@@ -1,4 +1,4 @@
--- โหลด WindUI
+โหลดลด WindUI
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Players = game:GetService("Players")
@@ -16,7 +16,7 @@ local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 local Mouse = LocalPlayer:GetMouse()
 
 local Window = WindUI:CreateWindow({
-    Title = "Yomo HUB 🧑‍💻 | v0.1  | ",
+    Title = "Yomo HUB 🧑‍💻 | v1*  | ",
     Icon = "menu",
     Author = "https://discord.gg/xWW3jhKM",
     Folder = "KungHubkFolder",
@@ -46,20 +46,20 @@ local NoRecoilEnabled = true
 local FOVRadius = 120
 local CurrentTarget = nil
 
-local ConstantPingTime = 0.1 -- 100ms
+local ConstantPingTime = 0.2 -- ดักปิงเป็น 200ms
 local ConstantBulletSpeed = 2000
 
 local SilentFOVCircle = Drawing.new("Circle")
 SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
-SilentFOVCircle.Thickness = 1
-SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Thickness = 2
+SilentFOVCircle.NumSides = 128
 SilentFOVCircle.Filled = false
 SilentFOVCircle.Transparency = 1
 SilentFOVCircle.Radius = FOVRadius
 SilentFOVCircle.Visible = false
 
 local Tracer = Drawing.new("Line")
-Tracer.Thickness = 1
+Tracer.Thickness = 2
 Tracer.Color = Color3.fromRGB(0, 255, 255)
 Tracer.Transparency = 1
 Tracer.Visible = false
@@ -86,13 +86,14 @@ local function isBehindWall(startPos, endPos)
     return false
 end
 
-local function predictWallbangPosition(head, hrp)
+local function predictWallbangPosition_New(head, hrp)
     local velocity = hrp and hrp.Velocity or Vector3.zero
     local origin = Camera.CFrame.Position
-    local distance = (head.Position - origin).Magnitude
-    local bulletTravelTime = distance / ConstantBulletSpeed
-    local t = bulletTravelTime + ConstantPingTime
-    return head.Position + (velocity * t)
+    local toTarget = head.Position - origin
+    local distance = toTarget.Magnitude
+    local bulletTime = distance / ConstantBulletSpeed
+    local predictTime = bulletTime + ConstantPingTime
+    return head.Position + (velocity * predictTime)
 end
 
 local function getClosestTarget()
@@ -164,7 +165,6 @@ end)
 local function doRecoilGunMods()
     while true do
         task.wait(1)
-        -- No Recoil Gun Mods Logic (compatible with normal tools & Attribute)
         for _, tool in pairs(LocalPlayer.Backpack:GetChildren()) do
             if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then
                 if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end
@@ -195,8 +195,14 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
         if head and humanoid and hrp then
             local myHeadPos = LocalPlayer.Character.Head.Position
             local targetPos = head.Position
+
             local wallbang = isBehindWall(myHeadPos, targetPos)
-            local aimPos = wallbang and predictWallbangPosition(head, hrp) or targetPos
+            local aimPos
+            if wallbang then
+                aimPos = predictWallbangPosition_New(head, hrp)
+            else
+                aimPos = targetPos
+            end
 
             args[4] = CFrame.new(math.huge, math.huge, math.huge)
             args[5] = {
@@ -217,20 +223,10 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
             beam.Size = Vector3.new(0.15, 0.15, (aimPos - LocalPlayer.Character.Head.Position).Magnitude)
             beam.CFrame = CFrame.new(LocalPlayer.Character.Head.Position, aimPos) * CFrame.new(0, 0, -beam.Size.Z/2)
             beam.Material = Enum.Material.Neon
-            beam.Transparency = 0.25
+            beam.Transparency = 0.17
+            beam.Color = wallbang and Color3.fromRGB(0, 128, 255) or Color3.fromRGB(0, 255, 0)
             beam.Parent = workspace
             Debris:AddItem(beam, 4)
-
-            do -- color on hit
-                spawn(function()
-                    wait(0.1)
-                    if humanoid and humanoid.Health < humanoid.MaxHealth then
-                        beam.Color = wallbang and Color3.fromRGB(0, 128, 255) or Color3.fromRGB(0, 255, 0)
-                    else
-                        beam.Color = Color3.fromRGB(255, 0, 0)
-                    end
-                end)
-            end
         end
     end
     return oldFire(self, unpack(args))
@@ -266,75 +262,6 @@ Tab:Slider({
 })
 
 -------------------------------
--- Job Automation -------------
--------------------------------
-local Tab_JOB = Window:Tab({
-    Title = "Job Automation",
-    Icon = "hammer"
-})
-local autoJobEnabled = false
-
-Tab_JOB:Toggle({
-    Title = "ATM Auto Job (ตัวอย่าง, แก้แมพ/ATM/Prompt ตามเกมคุณ)",
-    Default = false,
-    Callback = function(state)
-        autoJobEnabled = state
-    end
-})
-
-spawn(function()
-    while true do
-        task.wait(1.5)
-        if autoJobEnabled then
-            local atmPrompt = nil
-            for _, v in ipairs(workspace:GetDescendants()) do
-                if v:IsA("ProximityPrompt") and v.Parent and v.Parent.Name:lower():find("atm") then
-                    atmPrompt = v
-                    break
-                end
-            end
-            if atmPrompt and (LocalPlayer.Character.HumanoidRootPart.Position - atmPrompt.Parent.Position).Magnitude < 10 then
-                fireproximityprompt(atmPrompt)
-            end
-        end
-    end
-end)
-
--------------------------------
--- Anti Ragdoll ---------------
--------------------------------
-local Tab_MISC = Window:Tab({
-    Title = "Misc",
-    Icon = "shield"
-})
-local antiRagdollEnabled = false
-
-Tab_MISC:Toggle({
-    Title = "Anti Ragdoll (กันตัวล้มลื่น)",
-    Default = true,
-    Callback = function(state)
-        antiRagdollEnabled = state
-    end
-})
-
-spawn(function()
-    while true do
-        task.wait(0.75)
-        if antiRagdollEnabled then
-            local character = LocalPlayer.Character
-            local hrp = character and character:FindFirstChild("HumanoidRootPart")
-            if hrp and hrp:FindFirstChild("RagdollConstraint") then
-                hrp.RagdollConstraint:Destroy()
-            end
-            local hum = character and character:FindFirstChild("Humanoid")
-            if hum and hum:GetState() == Enum.HumanoidStateType.Physics then
-                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-            end
-        end
-    end
-end)
-
--------------------------------
 -- ESP Tab & Logic ------------
 -------------------------------
 
@@ -345,7 +272,6 @@ local Tab_ESP = Window:Tab({
 
 local boxESPEnabled = false
 local nameESPEnabled = false
-local itemESPEnabled = false
 local espPlayers = {}
 
 Tab_ESP:Toggle({
@@ -364,35 +290,6 @@ Tab_ESP:Toggle({
     end
 })
 
-Tab_ESP:Toggle({
-    Title = "Inventory Viewer ESP",
-    Default = false,
-    Callback = function(state)
-        itemESPEnabled = state
-    end
-})
-
-local function getPlayerInventory(player)
-    local inv = {}
-    local backpack = player:FindFirstChildOfClass("Backpack")
-    if backpack then
-        for _, item in pairs(backpack:GetChildren()) do
-            if item.Name and item:IsA("Tool") then
-                table.insert(inv, item.Name)
-            end
-        end
-    end
-    -- Check for equipped Item (มือถือ/ถืออยู่)
-    if player.Character then
-        for _, obj in pairs(player.Character:GetChildren()) do
-            if obj:IsA("Tool") then
-                table.insert(inv, "[E] " .. obj.Name)
-            end
-        end
-    end
-    return inv
-end
-
 local function createESP(player)
     local lines = {
         top = Drawing.new("Line"),
@@ -401,32 +298,25 @@ local function createESP(player)
         right = Drawing.new("Line"),
     }
     local nameText = Drawing.new("Text")
-    nameText.Size = 16
+    nameText.Size = 17
     nameText.Center = true
     nameText.Outline = true
+    nameText.OutlineColor = Color3.fromRGB(20, 20, 20)
     nameText.Color = Color3.fromRGB(255, 0, 0)
-
-    local itemText = Drawing.new("Text")
-    itemText.Size = 15
-    itemText.Center = true
-    itemText.Outline = true
-    itemText.Color = Color3.fromRGB(0, 255, 128)
 
     for _, line in pairs(lines) do
         line.Color = Color3.new(1, 1, 1)
-        line.Thickness = 1
+        line.Thickness = 2
         line.Visible = false
     end
     nameText.Visible = false
-    itemText.Visible = false
 
-    local drawings = {lines.top, lines.bottom, lines.left, lines.right, nameText, itemText}
+    local drawings = {lines.top, lines.bottom, lines.left, lines.right, nameText}
 
     local conn = RunService.RenderStepped:Connect(function()
         if not player.Character or not player.Character:FindFirstChild("Head") or not player.Character:FindFirstChild("HumanoidRootPart") then
             for _, line in pairs(lines) do line.Visible = false end
             nameText.Visible = false
-            itemText.Visible = false
             return
         end
 
@@ -466,24 +356,14 @@ local function createESP(player)
 
             if nameESPEnabled then
                 nameText.Text = player.Name
-                nameText.Position = Vector2.new(top.X, y - 16)
+                nameText.Position = Vector2.new(top.X, y - 20)
                 nameText.Visible = true
             else
                 nameText.Visible = false
             end
-
-            if itemESPEnabled then
-                local items = getPlayerInventory(player)
-                itemText.Text = #items > 0 and "ของ: " .. table.concat(items, ", ") or ""
-                itemText.Position = Vector2.new(top.X, y + height + 15)
-                itemText.Visible = #items > 0
-            else
-                itemText.Visible = false
-            end
         else
             for _, line in pairs(lines) do line.Visible = false end
             nameText.Visible = false
-            itemText.Visible = false
         end
     end)
 
@@ -518,3 +398,35 @@ local function loadESP()
 end
 
 loadESP()
+
+-------------------------------
+-- กันตุย (Anti Death) ---------
+-------------------------------
+local Tab_MISC = Window:Tab({
+    Title = "Misc",
+    Icon = "shield"
+})
+local antiDeathEnabled = false
+
+Tab_MISC:Toggle({
+    Title = "กันตุย (กันตาย/Auto Respawn)",
+    Default = true,
+    Callback = function(state)
+        antiDeathEnabled = state
+    end
+})
+
+spawn(function()
+    while true do
+        task.wait(0.5)
+        if antiDeathEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if humanoid.Health <= 0 then
+                if typeof(humanoid) == "Instance" and humanoid.Health == 0 then
+                    -- รีสปอนอัตโนมัติ (กันตุย)
+                    LocalPlayer:LoadCharacter()
+                end
+            end
+        end
+    end
+end)
