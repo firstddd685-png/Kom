@@ -8,7 +8,6 @@ local Camera = workspace.CurrentCamera
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
-local RaycastParams = RaycastParams.new()
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -17,7 +16,7 @@ local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 local Mouse = LocalPlayer:GetMouse()
 
 local Window = WindUI:CreateWindow({
-    Title = "Yomo HUB 🧑‍💻 | v1a  | ",
+    Title = "Yomo HUB 🧑‍💻 | v0.1  | ",
     Icon = "menu",
     Author = "https://discord.gg/xWW3jhKM",
     Folder = "KungHubkFolder",
@@ -43,16 +42,12 @@ local button = Window:EditOpenButton({
 ---------------------------------
 local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
 local SilentAimEnabled = false
+local NoRecoilEnabled = true
 local FOVRadius = 120
 local CurrentTarget = nil
 
 local ConstantPingTime = 0.1 -- 100ms
 local ConstantBulletSpeed = 2000
-local FULL_DAMAGE = 38
-local WALLBANG_DAMAGE = 19
-
--- No Recoil Toggle
-local NoRecoilEnabled = false
 
 local SilentFOVCircle = Drawing.new("Circle")
 SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
@@ -69,17 +64,24 @@ Tracer.Color = Color3.fromRGB(0, 255, 255)
 Tracer.Transparency = 1
 Tracer.Visible = false
 
--- Raycast check for wall
+-- Raycast เช็กกำแพง
 local function isBehindWall(startPos, endPos)
-    RaycastParams.FilterDescendantsInstances = {LocalPlayer.Character, CurrentTarget and CurrentTarget.Character or nil}
-    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    RaycastParams.IgnoreWater = true
-    local direction = (endPos - startPos)
-    local rayResult = workspace:Raycast(startPos, direction, RaycastParams)
+    if (startPos - endPos).Magnitude < 2 then return false end
+    local ignore = {LocalPlayer.Character}
+    if CurrentTarget and CurrentTarget.Character then
+        table.insert(ignore, CurrentTarget.Character)
+    end
+    local params = RaycastParams.new()
+    params.FilterDescendantsInstances = ignore
+    params.FilterType = Enum.RaycastFilterType.Blacklist
+    params.IgnoreWater = true
+    local direction = (endPos - startPos).Unit
+    local distance = (endPos - startPos).Magnitude
+    local rayResult = workspace:Raycast(startPos, direction * distance, params)
     if rayResult and rayResult.Instance then
-        local distanceToHit = (rayResult.Position - startPos).Magnitude
-        local distanceToTarget = (endPos - startPos).Magnitude
-        return distanceToHit < distanceToTarget - 1
+        if not (rayResult.Instance:IsDescendantOf(CurrentTarget.Character) or rayResult.Instance:IsDescendantOf(LocalPlayer.Character)) then
+            return true
+        end
     end
     return false
 end
@@ -159,14 +161,25 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- No Recoil (ป้องกันกล้องดีด)
-local function doRecoil()
-    if not NoRecoilEnabled then
-        -- กล้องดีดขึ้น/ข้างตามปกติ (สามารถเพิ่ม logic recoil ปืนจริงตรงนี้ได้ ถ้าต้องการ)
-        -- ตัวอย่าง: Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(-2), math.rad(2), 0)
+local function doRecoilGunMods()
+    while true do
+        task.wait(1)
+        -- No Recoil Gun Mods Logic (compatible with normal tools & Attribute)
+        for _, tool in pairs(LocalPlayer.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then
+                if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end
+                if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
+            end
+        end
+        for _, tool in pairs(LocalPlayer.Character:GetChildren()) do
+            if tool:IsA("Tool") and (tool:FindFirstChild("Recoil") or tool:GetAttribute("Recoil")) then
+                if tool:FindFirstChild("Recoil") then tool.Recoil.Value = 0 end
+                if tool:GetAttribute("Recoil") then tool:SetAttribute("Recoil", 0) end
+            end
+        end
     end
-    -- ถ้าเปิด NoRecoilEnabled จะไม่ดีดกล้อง
 end
+spawn(doRecoilGunMods)
 
 local Remote = ReplicatedStorage.Remotes.Send
 local oldFire
@@ -184,11 +197,6 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
             local targetPos = head.Position
             local wallbang = isBehindWall(myHeadPos, targetPos)
             local aimPos = wallbang and predictWallbangPosition(head, hrp) or targetPos
-            local damage = wallbang and WALLBANG_DAMAGE or FULL_DAMAGE
-
-            local displacement = aimPos - head.Position
-            local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
-            local previousHealth = humanoid.Health
 
             args[4] = CFrame.new(math.huge, math.huge, math.huge)
             args[5] = {
@@ -197,7 +205,6 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
                         ["Instance"] = head,
                         ["Normal"] = Vector3.new(0, 1, 0),
                         ["Position"] = aimPos,
-                        ["Damage"] = damage,
                         ["Wallbang"] = wallbang
                     }
                 }
@@ -214,17 +221,16 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
             beam.Parent = workspace
             Debris:AddItem(beam, 4)
 
-            spawn(function()
-                wait(0.1)
-                if humanoid and humanoid.Health < previousHealth then
-                    beam.Color = damage == FULL_DAMAGE and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 128, 255)
-                else
-                    beam.Color = Color3.fromRGB(255, 0, 0)
-                end
-            end)
-
-            -- Recoil handler
-            doRecoil()
+            do -- color on hit
+                spawn(function()
+                    wait(0.1)
+                    if humanoid and humanoid.Health < humanoid.MaxHealth then
+                        beam.Color = wallbang and Color3.fromRGB(0, 128, 255) or Color3.fromRGB(0, 255, 0)
+                    else
+                        beam.Color = Color3.fromRGB(255, 0, 0)
+                    end
+                end)
+            end
         end
     end
     return oldFire(self, unpack(args))
@@ -239,7 +245,7 @@ Tab:Toggle({
 })
 
 Tab:Toggle({
-    Title = "No Recoil",
+    Title = "No Recoil (กันกล้องดีด)",
     Default = true,
     Callback = function(state)
         NoRecoilEnabled = state
@@ -260,6 +266,75 @@ Tab:Slider({
 })
 
 -------------------------------
+-- Job Automation -------------
+-------------------------------
+local Tab_JOB = Window:Tab({
+    Title = "Job Automation",
+    Icon = "hammer"
+})
+local autoJobEnabled = false
+
+Tab_JOB:Toggle({
+    Title = "ATM Auto Job (ตัวอย่าง, แก้แมพ/ATM/Prompt ตามเกมคุณ)",
+    Default = false,
+    Callback = function(state)
+        autoJobEnabled = state
+    end
+})
+
+spawn(function()
+    while true do
+        task.wait(1.5)
+        if autoJobEnabled then
+            local atmPrompt = nil
+            for _, v in ipairs(workspace:GetDescendants()) do
+                if v:IsA("ProximityPrompt") and v.Parent and v.Parent.Name:lower():find("atm") then
+                    atmPrompt = v
+                    break
+                end
+            end
+            if atmPrompt and (LocalPlayer.Character.HumanoidRootPart.Position - atmPrompt.Parent.Position).Magnitude < 10 then
+                fireproximityprompt(atmPrompt)
+            end
+        end
+    end
+end)
+
+-------------------------------
+-- Anti Ragdoll ---------------
+-------------------------------
+local Tab_MISC = Window:Tab({
+    Title = "Misc",
+    Icon = "shield"
+})
+local antiRagdollEnabled = false
+
+Tab_MISC:Toggle({
+    Title = "Anti Ragdoll (กันตัวล้มลื่น)",
+    Default = true,
+    Callback = function(state)
+        antiRagdollEnabled = state
+    end
+})
+
+spawn(function()
+    while true do
+        task.wait(0.75)
+        if antiRagdollEnabled then
+            local character = LocalPlayer.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            if hrp and hrp:FindFirstChild("RagdollConstraint") then
+                hrp.RagdollConstraint:Destroy()
+            end
+            local hum = character and character:FindFirstChild("Humanoid")
+            if hum and hum:GetState() == Enum.HumanoidStateType.Physics then
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end
+    end
+end)
+
+-------------------------------
 -- ESP Tab & Logic ------------
 -------------------------------
 
@@ -270,6 +345,7 @@ local Tab_ESP = Window:Tab({
 
 local boxESPEnabled = false
 local nameESPEnabled = false
+local itemESPEnabled = false
 local espPlayers = {}
 
 Tab_ESP:Toggle({
@@ -288,6 +364,35 @@ Tab_ESP:Toggle({
     end
 })
 
+Tab_ESP:Toggle({
+    Title = "Inventory Viewer ESP",
+    Default = false,
+    Callback = function(state)
+        itemESPEnabled = state
+    end
+})
+
+local function getPlayerInventory(player)
+    local inv = {}
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    if backpack then
+        for _, item in pairs(backpack:GetChildren()) do
+            if item.Name and item:IsA("Tool") then
+                table.insert(inv, item.Name)
+            end
+        end
+    end
+    -- Check for equipped Item (มือถือ/ถืออยู่)
+    if player.Character then
+        for _, obj in pairs(player.Character:GetChildren()) do
+            if obj:IsA("Tool") then
+                table.insert(inv, "[E] " .. obj.Name)
+            end
+        end
+    end
+    return inv
+end
+
 local function createESP(player)
     local lines = {
         top = Drawing.new("Line"),
@@ -301,19 +406,27 @@ local function createESP(player)
     nameText.Outline = true
     nameText.Color = Color3.fromRGB(255, 0, 0)
 
+    local itemText = Drawing.new("Text")
+    itemText.Size = 15
+    itemText.Center = true
+    itemText.Outline = true
+    itemText.Color = Color3.fromRGB(0, 255, 128)
+
     for _, line in pairs(lines) do
         line.Color = Color3.new(1, 1, 1)
         line.Thickness = 1
         line.Visible = false
     end
     nameText.Visible = false
+    itemText.Visible = false
 
-    local drawings = {lines.top, lines.bottom, lines.left, lines.right, nameText}
+    local drawings = {lines.top, lines.bottom, lines.left, lines.right, nameText, itemText}
 
     local conn = RunService.RenderStepped:Connect(function()
         if not player.Character or not player.Character:FindFirstChild("Head") or not player.Character:FindFirstChild("HumanoidRootPart") then
             for _, line in pairs(lines) do line.Visible = false end
             nameText.Visible = false
+            itemText.Visible = false
             return
         end
 
@@ -358,9 +471,19 @@ local function createESP(player)
             else
                 nameText.Visible = false
             end
+
+            if itemESPEnabled then
+                local items = getPlayerInventory(player)
+                itemText.Text = #items > 0 and "ของ: " .. table.concat(items, ", ") or ""
+                itemText.Position = Vector2.new(top.X, y + height + 15)
+                itemText.Visible = #items > 0
+            else
+                itemText.Visible = false
+            end
         else
             for _, line in pairs(lines) do line.Visible = false end
             nameText.Visible = false
+            itemText.Visible = false
         end
     end)
 
