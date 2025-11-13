@@ -289,7 +289,8 @@ local Tab_ESP = Window:Tab({
 
 local boxESPEnabled = false
 local nameESPEnabled = false
-local itemESPEnabled = false
+local itemESPEnabled = false -- used for Inventory Viewer (player inventory)
+local itemDropESPEnabled = false -- NEW: Item Drop ESP (ของตกพื้น)
 local espPlayers = {}
 
 Tab_ESP:Toggle({
@@ -313,6 +314,14 @@ Tab_ESP:Toggle({
     Default = false,
     Callback = function(state)
         itemESPEnabled = state
+    end
+})
+
+Tab_ESP:Toggle({
+    Title = "Item Drop ESP", -- ปุ่มใหม่สำหรับมองของตกพื้น
+    Default = false,
+    Callback = function(state)
+        itemDropESPEnabled = state
     end
 })
 
@@ -462,3 +471,92 @@ local function loadESP()
 end
 
 loadESP()
+
+-------------------------
+-- ITEM DROP ESP (จากไฟล์ message.txt ปรับใช้กับ WindUI)
+-------------------------
+
+local dropfolder = workspace:FindFirstChild("DroppedItems")
+local item_drawings = {}
+
+local function Get2DPos(part)
+    local success, pos, onScreen = pcall(function()
+        return Camera:WorldToViewportPoint(part.Position)
+    end)
+    if success then
+        return Vector2.new(pos.X, pos.Y), pos.Z, onScreen
+    end
+    return Vector2.new(0,0), 0, false
+end
+
+RunService.RenderStepped:Connect(function()
+    if not itemDropESPEnabled then
+        for _, d in pairs(item_drawings) do
+            if d.box then d.box.Visible = false end
+            if d.name then d.name.Visible = false end
+            if d.dist then d.dist.Visible = false end
+        end
+        return
+    end
+
+    if not dropfolder then return end
+
+    -- ลบ drawings ของไอเทมที่หายไป
+    for obj, d in pairs(item_drawings) do
+        if not obj or not obj.Parent then
+            if d.box then d.box:Remove() end
+            if d.name then d.name:Remove() end
+            if d.dist then d.dist:Remove() end
+            item_drawings[obj] = nil
+        end
+    end
+
+    for _, item in pairs(dropfolder:GetChildren()) do
+        if item:IsA("Model") and item:FindFirstChild("PickUpZone") and not item:GetAttribute('Locked') then
+            local esp = item_drawings[item]
+            if not esp then
+                esp = {
+                    box = Drawing.new("Square"),
+                    name = Drawing.new("Text"),
+                    dist = Drawing.new("Text")
+                }
+                esp.box.Color = Color3.fromRGB(255,255,255)
+                esp.box.Thickness = 1
+                esp.box.Filled = false
+
+                esp.name.Color = Color3.fromRGB(255,255,255)
+                esp.name.Size = 15
+                esp.name.Center = true
+                esp.name.Outline = true
+
+                esp.dist.Color = Color3.fromRGB(0,255,128)
+                esp.dist.Size = 15
+                esp.dist.Center = true
+                esp.dist.Outline = true
+
+                item_drawings[item] = esp
+            end
+
+            local pos, depth, on = Get2DPos(item.PickUpZone)
+            if on and depth > 0 then
+                local sizescale = math.clamp(100 / depth, 20, 40)
+                esp.box.Size = Vector2.new(sizescale, sizescale)
+                esp.box.Position = Vector2.new(pos.X - sizescale/2, pos.Y - sizescale/2)
+                esp.box.Visible = true
+
+                esp.name.Text = item.Name
+                esp.name.Position = Vector2.new(pos.X, pos.Y - sizescale/2 - 10)
+                esp.name.Visible = true
+
+                local AmountItem = item:FindFirstChild("AmountBillboardGui") and item.AmountBillboardGui:FindFirstChild("TextLabel")
+                esp.dist.Text = "["..(AmountItem and AmountItem.Text or "?").."]"
+                esp.dist.Position = Vector2.new(pos.X, pos.Y + sizescale/2 + 5)
+                esp.dist.Visible = true
+            else
+                esp.box.Visible = false
+                esp.name.Visible = false
+                esp.dist.Visible = false
+            end
+        end
+    end
+end)
