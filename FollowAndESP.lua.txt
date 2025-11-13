@@ -48,7 +48,6 @@ local SilentAimEnabled = false
 local FOVRadius = 120
 local CurrentTarget = nil
 
--- ตั้งค่าดักปิง 100ms และกระสุน 2000 stud/s อัตโนมัติเมื่อเปิด Silent Aim
 local ConstantPingTime = 0.1 -- 100ms
 local ConstantBulletSpeed = 2000 -- studs/s
 
@@ -67,6 +66,10 @@ Tracer.Color = Color3.fromRGB(0, 255, 255)
 Tracer.Transparency = 1
 Tracer.Visible = false
 
+-- ----------- Silent Aim Damage Logic -----------------
+local FULL_DAMAGE = 38
+local WALLBANG_DAMAGE = 19
+
 local function isBehindWall(startPos, endPos)
     -- ยิง Ray เพื่อเช็คว่ามีสิ่งกีดขวางระหว่างจุดเริ่มต้นกับเป้าหมาย
     local ray = Ray.new(startPos, endPos - startPos)
@@ -75,7 +78,6 @@ local function isBehindWall(startPos, endPos)
     return hit ~= nil and ((hit.Position - endPos).Magnitude > 0.7)
 end
 
--- ยิงดักปิงและคำนวณจุด (ชดเชยความเร็วกระสุน)
 local function predictWallbangPosition(head, hrp)
     local velocity = hrp and hrp.Velocity or Vector3.zero
     local origin = Camera.CFrame.Position
@@ -83,11 +85,6 @@ local function predictWallbangPosition(head, hrp)
     local bulletTravelTime = distance / ConstantBulletSpeed
     local t = bulletTravelTime + ConstantPingTime
     return head.Position + (velocity * t)
-end
-
--- ยิงเข้าหัวตรงๆ
-local function headPosition(head)
-    return head.Position
 end
 
 local function getClosestTarget()
@@ -174,14 +171,17 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
             local myHeadPos = LocalPlayer.Character.Head.Position
             local targetPos = head.Position
             local aimPos
-
+            local damage
             if isBehindWall(myHeadPos, targetPos) then
-                -- ถ้ามีกำแพง ใช้ยิงทะลุ (predictWallbangPosition)
+                -- ถ้ามีสิ่งกีดขวาง ยิงทะลุ ดาเมจลด
                 aimPos = predictWallbangPosition(head, hrp)
+                damage = WALLBANG_DAMAGE
             else
-                -- ถ้าไม่มี ยิงเข้าหัวปกติ
-                aimPos = headPosition(head)
+                -- ไม่มีสิ่งกีดขวาง เข้าหัวเต็ม
+                aimPos = targetPos
+                damage = FULL_DAMAGE
             end
+
             local displacement = aimPos - head.Position
             local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
             local previousHealth = humanoid.Health
@@ -192,7 +192,9 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
                     [1] = {
                         ["Instance"] = head,
                         ["Normal"] = Vector3.new(0, 1, 0),
-                        ["Position"] = aimPos
+                        ["Position"] = aimPos,
+                        ["Damage"] = damage,
+                        ["Wallbang"] = isBehindWall(myHeadPos, targetPos)
                     }
                 }
             }
@@ -211,7 +213,7 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
             spawn(function()
                 wait(0.1)
                 if humanoid and humanoid.Health < previousHealth then
-                    beam.Color = Color3.fromRGB(0, 255, 0)
+                    beam.Color = damage == FULL_DAMAGE and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 128, 255)
                 else
                     beam.Color = Color3.fromRGB(255, 0, 0)
                 end
