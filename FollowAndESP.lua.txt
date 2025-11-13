@@ -1,7 +1,6 @@
 -- โหลด WindUI
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
--- Services
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,6 +8,7 @@ local Camera = workspace.CurrentCamera
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
+local RaycastParams = RaycastParams.new()
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -16,9 +16,8 @@ local Humanoid = Character:WaitForChild("Humanoid")
 local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 local Mouse = LocalPlayer:GetMouse()
 
--- WindUI Setup
 local Window = WindUI:CreateWindow({
-    Title = "Yomo HUB 🧑‍💻 | v1  | ",
+    Title = "Yomo HUB 🧑‍💻 | v1a  | ",
     Icon = "menu",
     Author = "https://discord.gg/xWW3jhKM",
     Folder = "KungHubkFolder",
@@ -39,17 +38,21 @@ local button = Window:EditOpenButton({
     Draggable = false,
 })
 
--------------------------------
+---------------------------------
 -- Silent Aim Tab & Logic -----
--------------------------------
-
+---------------------------------
 local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
 local SilentAimEnabled = false
 local FOVRadius = 120
 local CurrentTarget = nil
 
 local ConstantPingTime = 0.1 -- 100ms
-local ConstantBulletSpeed = 2000 -- studs/s
+local ConstantBulletSpeed = 2000
+local FULL_DAMAGE = 38
+local WALLBANG_DAMAGE = 19
+
+-- No Recoil Toggle
+local NoRecoilEnabled = false
 
 local SilentFOVCircle = Drawing.new("Circle")
 SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
@@ -66,16 +69,19 @@ Tracer.Color = Color3.fromRGB(0, 255, 255)
 Tracer.Transparency = 1
 Tracer.Visible = false
 
--- ----------- Silent Aim Damage Logic -----------------
-local FULL_DAMAGE = 38
-local WALLBANG_DAMAGE = 19
-
+-- Raycast check for wall
 local function isBehindWall(startPos, endPos)
-    -- ยิง Ray เพื่อเช็คว่ามีสิ่งกีดขวางระหว่างจุดเริ่มต้นกับเป้าหมาย
-    local ray = Ray.new(startPos, endPos - startPos)
-    local ignoreList = {LocalPlayer.Character, CurrentTarget and CurrentTarget.Character or nil}
-    local hit, part = workspace:FindPartOnRayWithIgnoreList(ray, ignoreList)
-    return hit ~= nil and ((hit.Position - endPos).Magnitude > 0.7)
+    RaycastParams.FilterDescendantsInstances = {LocalPlayer.Character, CurrentTarget and CurrentTarget.Character or nil}
+    RaycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    RaycastParams.IgnoreWater = true
+    local direction = (endPos - startPos)
+    local rayResult = workspace:Raycast(startPos, direction, RaycastParams)
+    if rayResult and rayResult.Instance then
+        local distanceToHit = (rayResult.Position - startPos).Magnitude
+        local distanceToTarget = (endPos - startPos).Magnitude
+        return distanceToHit < distanceToTarget - 1
+    end
+    return false
 end
 
 local function predictWallbangPosition(head, hrp)
@@ -96,16 +102,13 @@ local function getClosestTarget()
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
             local head = player.Character.Head
             local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-
             if onScreen then
                 local screenPos = Vector2.new(pos.X, pos.Y)
                 local distFromCenter = (screenPos - center).Magnitude
-
                 if distFromCenter <= FOVRadius then
                     local toTarget = (head.Position - Camera.CFrame.Position).Unit
                     local forward = Camera.CFrame.LookVector
                     local dot = forward:Dot(toTarget)
-
                     if dot > 0.5 then
                         local distance3D = (head.Position - LocalPlayer.Character.Head.Position).Magnitude
                         if distance3D < shortestDistance then
@@ -156,6 +159,15 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
+-- No Recoil (ป้องกันกล้องดีด)
+local function doRecoil()
+    if not NoRecoilEnabled then
+        -- กล้องดีดขึ้น/ข้างตามปกติ (สามารถเพิ่ม logic recoil ปืนจริงตรงนี้ได้ ถ้าต้องการ)
+        -- ตัวอย่าง: Camera.CFrame = Camera.CFrame * CFrame.Angles(math.rad(-2), math.rad(2), 0)
+    end
+    -- ถ้าเปิด NoRecoilEnabled จะไม่ดีดกล้อง
+end
+
 local Remote = ReplicatedStorage.Remotes.Send
 local oldFire
 oldFire = hookfunction(Remote.FireServer, function(self, ...)
@@ -170,17 +182,9 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
         if head and humanoid and hrp then
             local myHeadPos = LocalPlayer.Character.Head.Position
             local targetPos = head.Position
-            local aimPos
-            local damage
-            if isBehindWall(myHeadPos, targetPos) then
-                -- ถ้ามีสิ่งกีดขวาง ยิงทะลุ ดาเมจลด
-                aimPos = predictWallbangPosition(head, hrp)
-                damage = WALLBANG_DAMAGE
-            else
-                -- ไม่มีสิ่งกีดขวาง เข้าหัวเต็ม
-                aimPos = targetPos
-                damage = FULL_DAMAGE
-            end
+            local wallbang = isBehindWall(myHeadPos, targetPos)
+            local aimPos = wallbang and predictWallbangPosition(head, hrp) or targetPos
+            local damage = wallbang and WALLBANG_DAMAGE or FULL_DAMAGE
 
             local displacement = aimPos - head.Position
             local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
@@ -194,7 +198,7 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
                         ["Normal"] = Vector3.new(0, 1, 0),
                         ["Position"] = aimPos,
                         ["Damage"] = damage,
-                        ["Wallbang"] = isBehindWall(myHeadPos, targetPos)
+                        ["Wallbang"] = wallbang
                     }
                 }
             }
@@ -218,6 +222,9 @@ oldFire = hookfunction(Remote.FireServer, function(self, ...)
                     beam.Color = Color3.fromRGB(255, 0, 0)
                 end
             end)
+
+            -- Recoil handler
+            doRecoil()
         end
     end
     return oldFire(self, unpack(args))
@@ -228,6 +235,14 @@ Tab:Toggle({
     Default = false,
     Callback = function(state)
         SilentAimEnabled = state
+    end
+})
+
+Tab:Toggle({
+    Title = "No Recoil",
+    Default = true,
+    Callback = function(state)
+        NoRecoilEnabled = state
     end
 })
 
