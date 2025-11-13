@@ -18,7 +18,7 @@ local Mouse = LocalPlayer:GetMouse()
 
 -- WindUI Setup
 local Window = WindUI:CreateWindow({
-    Title = "Yomo HUB 🧑‍💻 | v2  | ",
+    Title = "Yomo HUB 🧑‍💻 | v1  | ",
     Icon = "menu",
     Author = "https://discord.gg/xWW3jhKM",
     Folder = "KungHubkFolder",
