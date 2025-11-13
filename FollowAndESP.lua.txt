@@ -1,195 +1,313 @@
--- LocalScript | เดินตามหลังผู้เล่นใกล้สุด (ไม่นับคนที่ตาย) + ESP เห็นกรอบรอบผู้เล่น, Toggle เปิดปิด
+-- เนเธซเธฅเธ” WindUI
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
+-- Services
 local Players = game:GetService("Players")
-local LOCAL_PLAYER = Players.LocalPlayer
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Camera = workspace.CurrentCamera
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
--- GUI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FollowESP_GUI"
-screenGui.Parent = LOCAL_PLAYER:WaitForChild("PlayerGui")
+local LocalPlayer = Players.LocalPlayer
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local Humanoid = Character:WaitForChild("Humanoid")
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local Mouse = LocalPlayer:GetMouse()
 
-local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 190, 0, 60)
-frame.Position = UDim2.new(0, 50, 0, 50)
-frame.BackgroundColor3 = Color3.fromRGB(40,25,40)
-frame.BackgroundTransparency = 0.2
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+-- WindUI Setup
+local Window = WindUI:CreateWindow({
+    Title = "Yomo HUB  | v2  | ",
+    Icon = "menu",
+    Author = "https://discord.gg/xWW3jhKM",
+    Folder = "KungHubkFolder",
+    Size = UDim2.fromOffset(400, 200),
+    Theme = "Dark",
+    Transparent = true,
+    Resizable = true,
+})
 
-local toggleBtn = Instance.new("TextButton")
-toggleBtn.Size = UDim2.new(0, 170, 0, 40)
-toggleBtn.Position = UDim2.new(0, 10, 0, 10)
-toggleBtn.Text = "Follow OFF"
-toggleBtn.TextSize = 24
-toggleBtn.BackgroundColor3 = Color3.fromRGB(100,30,30)
-toggleBtn.TextColor3 = Color3.fromRGB(255,220,220)
-toggleBtn.BorderSizePixel = 0
-toggleBtn.Parent = frame
+local button = Window:EditOpenButton({
+    Title = "Open Menu",
+    Icon = "apple",
+    CornerRadius = UDim.new(0,50),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(Color3.fromHSV(0, 1, 1), Color3.fromHSV(0.1, 1, 1)),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = false,
+})
 
--- ESP Container
-local espGui = Instance.new("ScreenGui")
-espGui.Name = "ESP_GUI"
-espGui.Parent = LOCAL_PLAYER:WaitForChild("PlayerGui")
-espGui.ResetOnSpawn = false
-espGui.IgnoreGuiInset = true
+local Tab = Window:Tab({Title = "Silent Aim", Icon = "crosshair"})
 
-local enabled = false
-local followConnection
-local espConnection
+local SilentAimEnabled = false
+local FOVRadius = 120
+local CurrentTarget = nil
 
-local WALK_SPEED = 16        -- ความเร็วเดิน
-local FOLLOW_DISTANCE = 3    -- ระยะห่างหลังเป้าหมาย
+local SilentFOVCircle = Drawing.new("Circle")
+SilentFOVCircle.Color = Color3.fromRGB(255, 255, 0)
+SilentFOVCircle.Thickness = 1
+SilentFOVCircle.NumSides = 64
+SilentFOVCircle.Filled = false
+SilentFOVCircle.Transparency = 1
+SilentFOVCircle.Radius = FOVRadius
+SilentFOVCircle.Visible = false
 
--- --- หา Player ที่ "ไม่ตาย" (Humanoid.Health > 0 และ not dead)
-local function getClosestAlivePlayer()
-    local myChar = LOCAL_PLAYER.Character
-    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") or not myChar:FindFirstChild("Humanoid") then return end
-    local myPos = myChar.HumanoidRootPart.Position
-    local closest, dist = nil, math.huge
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LOCAL_PLAYER and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") then
-            local hum = p.Character.Humanoid
-            if hum.Health > 0 and hum:GetState() ~= Enum.HumanoidStateType.Dead then
-                local pos = p.Character.HumanoidRootPart.Position
-                local d = (myPos - pos).Magnitude
-                if d < dist then
-                    closest = p
-                    dist = d
+local Tracer = Drawing.new("Line")
+Tracer.Thickness = 1
+Tracer.Color = Color3.fromRGB(0, 255, 255)
+Tracer.Transparency = 1
+Tracer.Visible = false
+
+-- เนเธเนเนเธซเนเนเธกเน predict ping เธขเธดเธเน€เธเนเธฒเนเธกเน€เธ”เธฅเธเธฃเธดเธ
+local function predictPosition(head, hrp)
+    return head.Position
+end
+
+local function getClosestTarget()
+    local closest = nil
+    local shortestDistance = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") then
+            local head = player.Character.Head
+            local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+
+            if onScreen then
+                local screenPos = Vector2.new(pos.X, pos.Y)
+                local distFromCenter = (screenPos - center).Magnitude
+
+                if distFromCenter <= FOVRadius then
+                    local toTarget = (head.Position - Camera.CFrame.Position).Unit
+                    local forward = Camera.CFrame.LookVector
+                    local dot = forward:Dot(toTarget)
+
+                    if dot > 0.5 then
+                        local distance3D = (head.Position - LocalPlayer.Character.Head.Position).Magnitude
+                        if distance3D < shortestDistance then
+                            shortestDistance = distance3D
+                            closest = player
+                        end
+                    end
                 end
             end
         end
     end
+
     return closest
 end
 
--- --- เดินตามหลัง
-local function slowFollow()
-    local myChar = LOCAL_PLAYER.Character
-    if not myChar or not myChar:FindFirstChild("HumanoidRootPart") or not myChar:FindFirstChild("Humanoid") then return end
-    local myHRP = myChar.HumanoidRootPart
-    local myHumanoid = myChar.Humanoid
+RunService.RenderStepped:Connect(function()
+    SilentFOVCircle.Visible = SilentAimEnabled
+    SilentFOVCircle.Position = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    SilentFOVCircle.Radius = FOVRadius
 
-    local target = getClosestAlivePlayer()
-    if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
-    local targetHRP = target.Character.HumanoidRootPart
-
-    local backOffset = targetHRP.CFrame.LookVector * -FOLLOW_DISTANCE
-    local targetPos = targetHRP.Position + backOffset + Vector3.new(0,0.1,0)
-
-    -- หมุนตัวเองไปทางเป้าหมาย
-    myHRP.CFrame = CFrame.new(myHRP.Position, targetHRP.Position)
-
-    -- เดินตามหลัง
-    myHumanoid.WalkSpeed = WALK_SPEED
-    myHumanoid:MoveTo(targetPos)
-end
-
-local function startFollowing()
-    if followConnection then return end
-    followConnection = RunService.Heartbeat:Connect(function()
-        pcall(slowFollow)
-    end)
-end
-
-local function stopFollowing()
-    if followConnection then
-        followConnection:Disconnect()
-        followConnection = nil
+    if SilentAimEnabled then
+        CurrentTarget = getClosestTarget()
+    else
+        CurrentTarget = nil
     end
-    local myChar = LOCAL_PLAYER.Character
-    if myChar and myChar:FindFirstChild("Humanoid") then
-        myChar.Humanoid:Move(Vector3.new(0,0,0))
-    end
-end
 
--- --- ESP Box (draw around 'alive' players)
-local function createOrGetESPBox(p)
-    local name = "ESP_".. p.Name
-    local box = espGui:FindFirstChild(name)
-    if not box then
-        box = Instance.new("Frame")
-        box.Name = name
-        box.BackgroundTransparency = 1
-        box.BorderSizePixel = 2
-        box.BorderColor3 = Color3.fromRGB(0,255,0)
-        box.Size = UDim2.new(0,60,0,60)
-        box.AnchorPoint = Vector2.new(0.5,0.5)
-        box.Parent = espGui
-    end
-    return box
-end
-
-local function removeESPBox(p)
-    local name = "ESP_".. p.Name
-    local box = espGui:FindFirstChild(name)
-    if box then
-        box:Destroy()
-    end
-end
-
-local function updateESP()
-    for _,p in ipairs(Players:GetPlayers()) do
-        if p ~= LOCAL_PLAYER and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character:FindFirstChild("Humanoid") then
-            local hum = p.Character.Humanoid
-            if hum.Health > 0 and hum:GetState() ~= Enum.HumanoidStateType.Dead then
-                local box = createOrGetESPBox(p)
-                -- project world to screen (ViewportPointToRay)
-                local pos, onScreen = workspace.CurrentCamera:WorldToViewportPoint(p.Character.HumanoidRootPart.Position)
-                if onScreen then
-                    box.Visible = true
-                    box.Position = UDim2.new(0, pos.X, 0, pos.Y)
-                else
-                    box.Visible = false
+    if CurrentTarget and CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head") then
+        local targetHead = CurrentTarget.Character.Head
+        local myHead = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Head")
+        local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
+        if myHead then
+            local myScreenPos, myOnScreen = Camera:WorldToViewportPoint(myHead.Position)
+            local targetScreenPos, targetOnScreen = Camera:WorldToViewportPoint(targetHead.Position)
+            if myOnScreen and targetOnScreen then
+                Tracer.Visible = true
+                Tracer.From = Vector2.new(myScreenPos.X, myScreenPos.Y)
+                Tracer.To = Vector2.new(targetScreenPos.X, targetScreenPos.Y)
+                if humanoid then
+                    local perc = humanoid.Health / humanoid.MaxHealth
+                    Tracer.Color = Color3.fromHSV(perc * 0.333, 1, 1)
                 end
             else
-                removeESPBox(p)
+                Tracer.Visible = false
             end
-        else
-            removeESPBox(p)
+        end
+    else
+        Tracer.Visible = false
+    end
+end)
+
+-- เธเธตเน€เธเธญเธฃเน Silent Aim เธขเธทเธเธขเธฑเธเธงเนเธฒเธ—เธฐเธฅเธธเธ—เธฑเนเธเธซเธกเธ” เนเธกเนเธกเธตเน€เธเนเธ wall
+local Remote = ReplicatedStorage.Remotes.Send
+local oldFire
+oldFire = hookfunction(Remote.FireServer, function(self, ...)
+    if self ~= Remote then
+        return oldFire(self, ...)
+    end
+    local args = {...}
+    if SilentAimEnabled and args[2] == "shoot_gun" and CurrentTarget then
+        local head = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("Head")
+        local hrp = CurrentTarget.Character and CurrentTarget.Character:FindFirstChild("HumanoidRootPart")
+        local humanoid = CurrentTarget.Character:FindFirstChild("Humanoid")
+        if head and humanoid and hrp then
+            local aimPos = predictPosition(head, hrp)
+            local displacement = aimPos - head.Position
+            local hitCFrame = CurrentTarget.Character:GetPivot() + displacement
+            local previousHealth = humanoid.Health
+
+            -- เธขเธดเธเธ—เธฐเธฅเธธ เนเธกเนเธกเธตเน€เธเธทเนเธญเธเนเธเธชเธดเนเธเธเธตเธ”เธเธงเธฒเธ
+
+            args[4] = CFrame.new(math.huge, math.huge, math.huge)
+            args[5] = {
+                [1] = {
+                    [1] = {
+                        ["Instance"] = head,
+                        ["Normal"] = Vector3.new(0, 1, 0),
+                        ["Position"] = aimPos
+                    }
+                }
+            }
+
+            -- เน€เธญเธเน€เธเธเธ•เนเน€เธ”เธดเธก
+            local beam = Instance.new("Part")
+            beam.Anchored = true
+            beam.CanCollide = false
+            beam.Size = Vector3.new(0.15, 0.15, (aimPos - LocalPlayer.Character.Head.Position).Magnitude)
+            beam.CFrame = CFrame.new(LocalPlayer.Character.Head.Position, aimPos) * CFrame.new(0, 0, -beam.Size.Z/2)
+            beam.Material = Enum.Material.Neon
+            beam.Transparency = 0.25
+            beam.Parent = workspace
+            Debris:AddItem(beam, 4)
+
+            spawn(function()
+                wait(0.1)
+                if humanoid and humanoid.Health < previousHealth then
+                    beam.Color = Color3.fromRGB(0, 255, 0)
+                    local targetCharacter = CurrentTarget.Character
+                    local clone = targetCharacter:Clone()
+                    clone.Name = "HitGhost"
+                    clone.PrimaryPart = clone:FindFirstChild("HumanoidRootPart")
+
+                    for _, child in ipairs(clone:GetChildren()) do
+                        if child:IsA("Humanoid") or child:IsA("Script") or child:IsA("LocalScript") then
+                            child:Destroy()
+                        end
+                    end
+
+                    for _, descendant in ipairs(clone:GetDescendants()) do
+                        if descendant:IsA("BasePart") then
+                            descendant.Anchored = true
+                            descendant.CanCollide = false
+                            descendant.Material = Enum.Material.Neon
+                            descendant.Color = Color3.fromRGB(128, 0, 128)
+                            descendant.Transparency = 0.5
+                        elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+                            descendant:Destroy()
+                        end
+                    end
+
+                    local highlight = Instance.new("Highlight")
+                    highlight.OutlineColor = Color3.fromRGB(128, 0, 128)
+                    highlight.FillColor = Color3.fromRGB(128, 0, 128)
+                    highlight.OutlineTransparency = 0
+                    highlight.FillTransparency = 0.7
+                    highlight.Parent = clone
+
+                    clone:SetPivot(hitCFrame)
+                    clone.Parent = workspace
+
+                    local tweenInfo = TweenInfo.new(1, Enum.EasingStyle.Linear)
+                    local partGoals = {Transparency = 1}
+                    local highlightGoals = {OutlineTransparency = 1, FillTransparency = 1}
+
+                    for _, descendant in ipairs(clone:GetDescendants()) do
+                        if descendant:IsA("BasePart") then
+                            TweenService:Create(descendant, tweenInfo, partGoals):Play()
+                        end
+                    end
+                    TweenService:Create(highlight, tweenInfo, highlightGoals):Play()
+
+                    Debris:AddItem(clone, 2)
+
+                    if LocalPlayer and LocalPlayer.Character then
+                        local hitBox = Instance.new("Part")
+                        hitBox.Size = Vector3.new(1.2, 1.2, 1.2)
+                        hitBox.Anchored = true
+                        hitBox.CanCollide = false
+                        hitBox.Material = Enum.Material.Neon
+                        hitBox.Color = Color3.fromRGB(128, 0, 128)
+                        hitBox.CFrame = CFrame.new(aimPos)
+                        hitBox.Parent = workspace
+
+                        local playerClone = LocalPlayer.Character:Clone()
+                        playerClone.Name = "PlayerHitClone"
+
+                        for _, child in ipairs(playerClone:GetChildren()) do
+                            if child:IsA("Humanoid") or child:IsA("Script") or child:IsA("LocalScript") then
+                                child:Destroy()
+                            end
+                        end
+
+                        for _, descendant in ipairs(playerClone:GetDescendants()) do
+                            if descendant:IsA("BasePart") then
+                                descendant.Anchored = true
+                                descendant.CanCollide = false
+                                descendant.Material = Enum.Material.Neon
+                                descendant.Color = Color3.fromRGB(128, 0, 128)
+                                descendant.Transparency = 0.6
+                            elseif descendant:IsA("Decal") or descendant:IsA("Texture") then
+                                descendant:Destroy()
+                            end
+                        end
+
+                        if playerClone:FindFirstChild("HumanoidRootPart") then
+                            pcall(function()
+                                playerClone.PrimaryPart = playerClone:FindFirstChild("HumanoidRootPart")
+                                playerClone:SetPrimaryPartCFrame(CFrame.new(aimPos))
+                            end)
+                        else
+                            playerClone:SetPivot(CFrame.new(aimPos))
+                        end
+
+                        playerClone.Parent = workspace
+
+                        local fadeTweenInfo = TweenInfo.new(1.8, Enum.EasingStyle.Linear)
+                        local hitBoxGoals = {Transparency = 1}
+                        TweenService:Create(hitBox, fadeTweenInfo, hitBoxGoals):Play()
+
+                        for _, descendant in ipairs(playerClone:GetDescendants()) do
+                            if descendant:IsA("BasePart") then
+                                TweenService:Create(descendant, fadeTweenInfo, {Transparency = 1}):Play()
+                            end
+                        end
+
+                        Debris:AddItem(hitBox, 2)
+                        Debris:AddItem(playerClone, 2)
+                    end
+                else
+                    beam.Color = Color3.fromRGB(255, 0, 0)
+                end
+            end)
         end
     end
-end
-
--- --- เช็ค ESP ทุกเฟรม
-local function startESP()
-    if espConnection then return end
-    espConnection = RunService.RenderStepped:Connect(function()
-        pcall(updateESP)
-    end)
-end
-
-local function stopESP()
-    if espConnection then
-        espConnection:Disconnect()
-        espConnection = nil
-    end
-    for _,p in ipairs(Players:GetPlayers()) do
-        removeESPBox(p)
-    end
-end
-
-toggleBtn.MouseButton1Click:Connect(function()
-    enabled = not enabled
-    if enabled then
-        toggleBtn.Text = "Follow ON"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(40,100,40)
-        toggleBtn.TextColor3 = Color3.fromRGB(220,255,220)
-        startFollowing()
-        startESP()
-    else
-        toggleBtn.Text = "Follow OFF"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(100,30,30)
-        toggleBtn.TextColor3 = Color3.fromRGB(255,220,220)
-        stopFollowing()
-        stopESP()
-    end
+    return oldFire(self, unpack(args))
 end)
 
-Players.LocalPlayer.CharacterAdded:Connect(function()
-    if enabled then
-        stopFollowing()
-        wait(2)
-        startFollowing()
+Tab:Toggle({
+    Title = "Silent Aim",
+    Default = false,
+    Callback = function(state)
+        SilentAimEnabled = state
     end
-end)
+})
+
+Tab:Slider({
+    Title = "FOV: ",
+    Step = 1,
+    Value = {
+        Min = 20,
+        Max = 500,
+        Default = FOVRadius,
+    },
+    Callback = function(value)
+        FOVRadius = tonumber(value) or 120
+        print("FOV",FOVRadius)
+    end
+})
