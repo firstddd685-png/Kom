@@ -16,7 +16,7 @@ local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 local Mouse = LocalPlayer:GetMouse()
 
 local Window = WindUI:CreateWindow({
-    Title = "Yomo HUB 🧑‍💻 | v1*  | ",
+    Title = "Yomo HUB 🧑‍💻 | v2  | ",
     Icon = "menu",
     Author = "https://discord.gg/xWW3jhKM",
     Folder = "KungHubkFolder",
